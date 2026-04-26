@@ -1,0 +1,6 @@
+project:
+  description: Simple REST API for personal notes. FastAPI + SQLite.
+  name: gg-test
+tools:
+- codex
+- claude
