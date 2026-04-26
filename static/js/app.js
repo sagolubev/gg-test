@@ -99,16 +99,30 @@ async function doLogin() {
     if (!data) return;
     if (data.token) {
         setToken(data.token, data.username);
-        // Open redirect: reads returnUrl from query string without validation
         const params = new URLSearchParams(window.location.search);
-        const returnUrl = params.get("returnUrl");
-        if (returnUrl) {
-            window.location.href = returnUrl; // open redirect
+        const safeReturnUrl = getSafeReturnUrl(params.get("returnUrl"));
+        if (safeReturnUrl) {
+            window.location.href = safeReturnUrl;
         } else {
             showNotes();
         }
     } else {
         document.getElementById("login-error").textContent = data.detail || "Login failed";
+    }
+}
+
+function getSafeReturnUrl(rawReturnUrl) {
+    if (!rawReturnUrl) return null;
+    if (!rawReturnUrl.startsWith("/") || rawReturnUrl.startsWith("//") || rawReturnUrl.includes("\\")) {
+        return null;
+    }
+
+    try {
+        const url = new URL(rawReturnUrl, window.location.origin);
+        if (url.origin !== window.location.origin) return null;
+        return `${url.pathname}${url.search}${url.hash}`;
+    } catch (e) {
+        return null;
     }
 }
 
