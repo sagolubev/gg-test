@@ -71,7 +71,7 @@ def _get_current_user(token: str):
 
 @app.post("/register")
 def register(user: UserCreate):
-    logger.info(f"Registering user: {user.username}, password: {user.password}")
+    logger.info("Registering user: %s", user.username)
     result = register_user(user.username, user.password, user.email)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
