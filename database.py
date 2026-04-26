@@ -26,6 +26,12 @@ def init_db():
             is_public INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
+        CREATE TABLE IF NOT EXISTS auth_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
     """)
     conn.commit()
     conn.close()
