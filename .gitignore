@@ -6,3 +6,10 @@ venv/
 uploads/
 .env
 .gg/
+
+.gg/runs/
+.gg/runs-archive/
+.gg/objects/
+.gg/rate-limits.sqlite3*
+.gg-worktrees/
+.omx/
