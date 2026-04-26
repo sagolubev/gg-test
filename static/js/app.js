@@ -5,9 +5,8 @@
 // 3. Hardcoded API base URL
 // 4. Sensitive data exposed in URL params
 // 5. No CSRF protection
-// 6. eval() used for "template rendering"
-// 7. Debug info logged to console including token
-// 8. Open redirect in login flow
+// 6. Debug info logged to console including token
+// 7. Open redirect in login flow
 
 const API_BASE = "http://localhost:8000";
 
@@ -133,7 +132,7 @@ async function showNotes() {
     const notes = await apiRequest("GET", "/notes");
     if (!notes) return;
 
-    let html = `
+    const html = `
         <div class="container">
             <div class="card">
                 <h3 style="margin-bottom:12px">Search</h3>
@@ -158,23 +157,43 @@ async function showNotes() {
                 </label>
                 <button onclick="createNote()">Save Note</button>
             </div>
-            <h3 style="margin: 16px 0 8px">My Notes (${notes.length})</h3>`;
-
-    for (const note of notes) {
-        // XSS: innerHTML with unescaped note content from server
-        html += `
-            <div class="card note-card" id="note-${note.id}">
-                <div class="note-title">${note.title}</div>
-                <div class="note-content">${note.content}</div>
-                <div class="note-actions">
-                    <button class="secondary" onclick="editNote(${note.id})">Edit</button>
-                    <button class="danger" onclick="deleteNote(${note.id})">Delete</button>
-                </div>
-            </div>`;
-    }
-    html += `</div>`;
+            <h3 style="margin: 16px 0 8px">My Notes (${notes.length})</h3>
+            <div id="notes-list"></div>
+        </div>`;
 
     document.getElementById("app").innerHTML = html;
+
+    const notesList = document.getElementById("notes-list");
+    for (const note of notes) {
+        const card = document.createElement("div");
+        card.className = "card note-card";
+        card.id = `note-${note.id}`;
+
+        const title = document.createElement("div");
+        title.className = "note-title";
+        title.textContent = note.title ?? "";
+
+        const content = document.createElement("div");
+        content.className = "note-content";
+        content.textContent = note.content ?? "";
+
+        const actions = document.createElement("div");
+        actions.className = "note-actions";
+
+        const edit = document.createElement("button");
+        edit.className = "secondary";
+        edit.textContent = "Edit";
+        edit.onclick = () => editNote(note.id);
+
+        const del = document.createElement("button");
+        del.className = "danger";
+        del.textContent = "Delete";
+        del.onclick = () => deleteNote(note.id);
+
+        actions.append(edit, del);
+        card.append(title, content, actions);
+        notesList.appendChild(card);
+    }
 }
 
 async function createNote() {
@@ -194,18 +213,39 @@ async function editNote(id) {
     const note = await apiRequest("GET", `/notes/${id}`);
     if (!note) return;
 
-    // XSS: innerHTML with note data
-    document.getElementById(`note-${id}`).innerHTML = `
-        <div class="form-group">
-            <input id="edit-title-${id}" type="text" value="${note.title}">
-        </div>
-        <div class="form-group">
-            <textarea id="edit-content-${id}">${note.content}</textarea>
-        </div>
-        <div style="display:flex;gap:8px">
-            <button onclick="saveNote(${id})">Save</button>
-            <button class="secondary" onclick="showNotes()">Cancel</button>
-        </div>`;
+    const card = document.getElementById(`note-${id}`);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "form-group";
+
+    const titleInput = document.createElement("input");
+    titleInput.id = `edit-title-${id}`;
+    titleInput.type = "text";
+    titleInput.value = note.title ?? "";
+    titleGroup.appendChild(titleInput);
+
+    const contentGroup = document.createElement("div");
+    contentGroup.className = "form-group";
+
+    const contentTextarea = document.createElement("textarea");
+    contentTextarea.id = `edit-content-${id}`;
+    contentTextarea.value = note.content ?? "";
+    contentGroup.appendChild(contentTextarea);
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.gap = "8px";
+
+    const save = document.createElement("button");
+    save.textContent = "Save";
+    save.onclick = () => saveNote(id);
+
+    const cancel = document.createElement("button");
+    cancel.className = "secondary";
+    cancel.textContent = "Cancel";
+    cancel.onclick = showNotes;
+
+    actions.append(save, cancel);
+    card.replaceChildren(titleGroup, contentGroup, actions);
 }
 
 async function saveNote(id) {
@@ -228,27 +268,50 @@ async function doSearch() {
         return;
     }
 
-    let html = "";
+    container.replaceChildren();
     for (const note of results) {
-        // XSS: innerHTML, also tries to highlight using eval-based template
-        const highlighted = renderTemplate(note.title, q);
-        html += `<div class="note-card card" style="margin-bottom:8px">
-            <div class="note-title">${highlighted}</div>
-            <div class="note-content">${note.content}</div>
-        </div>`;
+        const card = document.createElement("div");
+        card.className = "note-card card";
+        card.style.marginBottom = "8px";
+
+        const title = document.createElement("div");
+        title.className = "note-title";
+        appendHighlightedText(title, note.title ?? "", q);
+
+        const content = document.createElement("div");
+        content.className = "note-content";
+        content.textContent = note.content ?? "";
+
+        card.append(title, content);
+        container.appendChild(card);
     }
-    container.innerHTML = html;
 }
 
-// eval-based "template engine" for highlighting
-function renderTemplate(text, term) {
-    try {
-        // Vulnerability: eval with user-controlled term
-        const fn = eval(`(text, term) => text.replace(new RegExp(term, 'gi'), m => '<span class="highlight">' + m + '</span>')`);
-        return fn(text, term);
-    } catch (e) {
-        return text;
+function appendHighlightedText(parent, text, term) {
+    if (!term) {
+        parent.textContent = text;
+        return;
     }
+
+    const source = String(text);
+    const needle = String(term).toLowerCase();
+    const haystack = source.toLowerCase();
+    let index = 0;
+    let matchIndex = haystack.indexOf(needle, index);
+
+    while (matchIndex !== -1) {
+        parent.appendChild(document.createTextNode(source.slice(index, matchIndex)));
+
+        const highlight = document.createElement("span");
+        highlight.className = "highlight";
+        highlight.textContent = source.slice(matchIndex, matchIndex + needle.length);
+        parent.appendChild(highlight);
+
+        index = matchIndex + needle.length;
+        matchIndex = haystack.indexOf(needle, index);
+    }
+
+    parent.appendChild(document.createTextNode(source.slice(index)));
 }
 
 function showProfile() {
