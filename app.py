@@ -1,5 +1,8 @@
 import os
 import logging
+from pathlib import Path
+import re
+import tempfile
 import traceback
 
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
@@ -9,7 +12,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from auth import get_user_by_token, login_user, register_user
-from config import ADMIN_PASSWORD, DEBUG, UPLOAD_DIR
+from config import (
+    ADMIN_PASSWORD,
+    DEBUG,
+    UPLOAD_ALLOWED_CONTENT_TYPES,
+    UPLOAD_ALLOWED_EXTENSIONS,
+    UPLOAD_DIR,
+    UPLOAD_MAX_BYTES,
+)
 from database import get_db, init_db
 
 logging.basicConfig(level=logging.DEBUG)
@@ -67,6 +77,31 @@ def _get_current_user(token: str):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid token")
     return user
+
+
+def _sanitize_upload_filename(filename: str) -> str:
+    basename = os.path.basename((filename or "").replace("\\", "/")).strip()
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", basename)
+    if not safe_name or safe_name in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return safe_name
+
+
+def _resolve_upload_destination(filename: str) -> Path:
+    upload_root = Path(UPLOAD_DIR).resolve()
+    destination = (upload_root / filename).resolve()
+    try:
+        destination.relative_to(upload_root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid upload path")
+    return destination
+
+
+def _validate_upload_file(file: UploadFile, safe_filename: str) -> None:
+    extension = Path(safe_filename).suffix.lower()
+    content_type = (file.content_type or "").split(";", 1)[0].lower()
+    if extension not in UPLOAD_ALLOWED_EXTENSIONS or content_type not in UPLOAD_ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported file type")
 
 
 @app.post("/register")
@@ -181,12 +216,37 @@ def list_public_notes():
 @app.post("/upload")
 def upload_file(file: UploadFile = File(...), x_token: str = Header(None)):
     _get_current_user(x_token)
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    # No file type validation, path traversal possible
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
-    with open(file_path, "wb") as f:
-        f.write(file.file.read())
-    return {"filename": file.filename, "path": file_path}
+    safe_filename = _sanitize_upload_filename(file.filename)
+    _validate_upload_file(file, safe_filename)
+    destination = _resolve_upload_destination(safe_filename)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    temp_path = None
+    bytes_written = 0
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb",
+            delete=False,
+            dir=destination.parent,
+            prefix=f".{safe_filename}.",
+            suffix=".tmp",
+        ) as temp_file:
+            temp_path = Path(temp_file.name)
+            while True:
+                chunk = file.file.read(64 * 1024)
+                if not chunk:
+                    break
+                bytes_written += len(chunk)
+                if bytes_written > UPLOAD_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large")
+                temp_file.write(chunk)
+        os.replace(temp_path, destination)
+    except Exception:
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
+        raise
+
+    return {"filename": safe_filename, "path": str(Path(UPLOAD_DIR) / safe_filename)}
 
 
 @app.post("/calc")
