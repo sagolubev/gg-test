@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from auth import get_user_by_token, login_user, register_user
-from config import ADMIN_PASSWORD, DEBUG, UPLOAD_DIR
+from config import ADMIN_PASSWORD, ALLOWED_ORIGINS, DEBUG, UPLOAD_DIR
 from database import get_db, init_db
 
 logging.basicConfig(level=logging.DEBUG)
@@ -27,7 +27,7 @@ def root():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
